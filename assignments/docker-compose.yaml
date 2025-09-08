@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENVIRONMENT: 'development'
+      APP_SERVER_PORT: '8000'
+      DB_HOST: 'postgres'
+      DB_PORT: '5432'
+      DB_USER: 'postgres'
+      DB_PASSWORD: 'postgres'
+      DB_NAME: 'restful'
+      DB_SSLMODE: 'disable'
+      DB_MAX_CONNS: '20'
+      APP_REDIS_HOST: 'redis'
+      APP_REDIS_PORT: '6379'
+      APP_REDIS_PASSWORD: ''
+      APP_REDIS_DB: '0'
+      APP_JWT_SECRET: 'your-jwt-secret-key-here'
+      APP_JWT_EXPIRES_IN: '15m'
+      APP_JWT_REFRESH_SECRET: 'your-refresh-secret-key-here'
+      APP_JWT_REFRESH_IN: '7d'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  pg-migrate:
+    container_name: pg-migrate
+    image: migrate/migrate
+    depends_on:
+      - postgres
+    volumes:
+      - ./migrations:/migrations
+    command: [
+      "-path", "./migrations",
+      "-database", "postgres://postgres:postgres@postgres:5432/restful?sslmode=disable",
+      "up"
+    ]
+    environment:
+      PG_URL: postgres://postgres:postgres@db:5432/restful?sslmode=disable
+    networks:
+      - network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=restful
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 512M
+
+networks:
+  network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
